@@ -1,10 +1,16 @@
 console.log("SmartFeed AI: Content script active. Initializing observer...");
 
 let processTimer = null;
+
 const DEBOUNCE_DELAY = 1000;
 const AI_CARD_STYLE_ID = "smartfeed-ai-card-style";
 
+const REMOVE_ANIMATION_DURATION = 350;
+const FLIP_ANIMATION_DURATION = 500;
+
+
 injectSmartFeedStyles();
+
 
 
 // ============================================================
@@ -14,61 +20,54 @@ injectSmartFeedStyles();
 function extractAndProcessVideos() {
 
     const videoElements = document.querySelectorAll(
+
         'ytd-rich-item-renderer:not([data-ai-processed="true"])'
+
     );
+
 
     if (videoElements.length === 0) return;
 
+
     console.log(
+
         `Found ${videoElements.length} new video cards.`
+
     );
 
+
     const videoBatch = [];
+
     const elementMap = new Map();
+
 
 
     videoElements.forEach((element) => {
 
         try {
 
+
             // ====================================================
-            // 1. FIND THE REAL VIDEO TITLE LINK
+            // 1. FIND REAL VIDEO TITLE LINK
             // ====================================================
-
-            /*
-                YouTube's new homepage DOM uses:
-
-                a.ytLockupMetadataViewModelTitle
-
-                for the actual video title.
-
-                Previously we were finding the first /watch?v=
-                link, which was sometimes the thumbnail link.
-
-                That caused us to extract:
-
-                Mix
-                LIVE
-                12:55
-
-                instead of the real video title.
-            */
 
             const titleLink = element.querySelector(
+
                 'a.ytLockupMetadataViewModelTitle[href*="/watch?v="]'
+
             );
 
-
-            // If we cannot find a title link,
-            // this might be an ad, post, short, etc.
 
             if (!titleLink) {
 
                 console.warn(
+
                     "Skipped card: Real title link not found."
+
                 );
 
                 return;
+
             }
 
 
@@ -79,16 +78,20 @@ function extractAndProcessVideos() {
 
             const url = new URL(titleLink.href);
 
+
             const videoId = url.searchParams.get("v");
 
 
             if (!videoId) {
 
                 console.warn(
+
                     "Skipped card: Video ID not found."
+
                 );
 
                 return;
+
             }
 
 
@@ -103,10 +106,13 @@ function extractAndProcessVideos() {
             if (!title) {
 
                 console.warn(
+
                     "Skipped card: Video title is empty."
+
                 );
 
                 return;
+
             }
 
 
@@ -116,7 +122,9 @@ function extractAndProcessVideos() {
             // ====================================================
 
             const metadataRows = element.querySelectorAll(
+
                 ".ytContentMetadataViewModelMetadataRow"
+
             );
 
 
@@ -125,8 +133,9 @@ function extractAndProcessVideos() {
 
             if (metadataRows.length > 0) {
 
-                channel =
-                    metadataRows[0].textContent.trim();
+                channel = metadataRows[0]
+                    .textContent
+                    .trim();
 
             }
 
@@ -137,12 +146,19 @@ function extractAndProcessVideos() {
             // ====================================================
 
             console.log(
+
                 "EXTRACTED VIDEO:",
+
                 {
+
                     videoId,
+
                     title,
+
                     channel
+
                 }
+
             );
 
 
@@ -166,30 +182,15 @@ function extractAndProcessVideos() {
 
 
             // ====================================================
-            // 7. CONNECT VIDEO ID TO YOUTUBE HTML ELEMENT
+            // 7. CONNECT VIDEO ID TO YOUTUBE ELEMENT
             // ====================================================
 
-            /*
-                Example:
-
-                abc123
-                    ↓
-                YouTube Video Card HTML
-
-
-                Later when Python returns:
-
-                {
-                    video_id: "abc123",
-                    action: "Hide"
-                }
-
-                We can find the correct HTML element.
-            */
-
             elementMap.set(
+
                 videoId,
+
                 element
+
             );
 
 
@@ -198,26 +199,25 @@ function extractAndProcessVideos() {
             // 8. MARK VIDEO AS PROCESSED
             // ====================================================
 
-            /*
-                IMPORTANT:
-
-                We only mark it AFTER successful extraction.
-
-                Otherwise failed videos would never be
-                processed again.
-            */
-
             element.setAttribute(
+
                 "data-ai-processed",
+
                 "true"
+
             );
 
 
-        } catch (error) {
+        }
+
+        catch (error) {
 
             console.error(
+
                 "Video extraction error:",
+
                 error
+
             );
 
         }
@@ -227,7 +227,9 @@ function extractAndProcessVideos() {
 
 
     console.log(
+
         `Successfully extracted ${videoBatch.length} videos. Sending to AI...`
+
     );
 
 
@@ -235,8 +237,11 @@ function extractAndProcessVideos() {
     if (videoBatch.length > 0) {
 
         sendToAIBackend(
+
             videoBatch,
+
             elementMap
+
         );
 
     }
@@ -250,46 +255,62 @@ function extractAndProcessVideos() {
 // ============================================================
 
 function sendToAIBackend(
+
     videos,
+
     elementMap
+
 ) {
 
+
     chrome.storage.local.get(
+
         ["userInterests"],
+
         (result) => {
 
-            const interests =
-                result.userInterests;
+
+            const interests = result.userInterests;
 
 
-
-            // Check if user has saved interests
 
             if (
+
                 !interests ||
+
                 Object.keys(interests).length === 0
+
             ) {
 
+
                 console.warn(
+
                     "No interests saved. Open the extension and save your interests."
+
                 );
 
+
                 return;
+
             }
 
 
 
             console.log(
+
                 "Sending videos to background...",
+
                 {
+
                     interests,
+
                     videoCount: videos.length
+
                 }
+
             );
 
 
-
-            // Send message to background.js
 
             chrome.runtime.sendMessage(
 
@@ -308,35 +329,47 @@ function sendToAIBackend(
 
 
                     // ============================================
-                    // CHECK CHROME COMMUNICATION ERROR
+                    // COMMUNICATION ERROR
                     // ============================================
 
                     if (chrome.runtime.lastError) {
 
+
                         console.error(
+
                             "Communication error:",
+
                             chrome.runtime.lastError
+
                         );
 
+
                         return;
+
                     }
 
 
 
                     // ============================================
-                    // SUCCESSFUL AI RESPONSE
+                    // SUCCESS
                     // ============================================
 
                     if (response?.success) {
 
+
                         console.log(
+
                             `Received AI rankings for ${response.data.length} videos.`
+
                         );
 
 
                         applyFiltersToDOM(
+
                             response.data,
+
                             elementMap
+
                         );
 
                     }
@@ -348,9 +381,13 @@ function sendToAIBackend(
 
                     else {
 
+
                         console.error(
+
                             "Backend error:",
+
                             response
+
                         );
 
                     }
@@ -368,44 +405,327 @@ function sendToAIBackend(
 
 
 // ============================================================
+// GET ALL CURRENT VIDEO CARDS
+// ============================================================
+
+function getCurrentVideoCards() {
+
+    return Array.from(
+
+        document.querySelectorAll(
+
+            'ytd-rich-item-renderer[data-ai-processed="true"]'
+
+        )
+
+    );
+
+}
+
+
+
+// ============================================================
+// FLIP STEP 1
+//
+// RECORD CURRENT CARD POSITIONS
+// ============================================================
+
+function recordCardPositions(cards) {
+
+    const positions = new Map();
+
+
+    cards.forEach((card) => {
+
+
+        if (!card.isConnected) return;
+
+
+        const rectangle = card.getBoundingClientRect();
+
+
+        positions.set(
+
+            card,
+
+            {
+
+                left: rectangle.left,
+
+                top: rectangle.top
+
+            }
+
+        );
+
+    });
+
+
+    return positions;
+
+}
+
+
+
+// ============================================================
+// FLIP STEP 2
+//
+// ANIMATE CARDS FROM OLD POSITION TO NEW POSITION
+// ============================================================
+
+function animateCardRearrangement(
+
+    oldPositions,
+
+    remainingCards
+
+) {
+
+
+    remainingCards.forEach((card) => {
+
+
+        if (!card.isConnected) return;
+
+
+        const oldPosition = oldPositions.get(card);
+
+
+        if (!oldPosition) return;
+
+
+
+        // ====================================================
+        // GET NEW POSITION
+        // ====================================================
+
+        const newRectangle = card.getBoundingClientRect();
+
+
+
+        // ====================================================
+        // CALCULATE MOVEMENT DIFFERENCE
+        // ====================================================
+
+        const deltaX =
+
+            oldPosition.left -
+
+            newRectangle.left;
+
+
+        const deltaY =
+
+            oldPosition.top -
+
+            newRectangle.top;
+
+
+
+        // ====================================================
+        // CARD DID NOT MOVE
+        // ====================================================
+
+        if (
+
+            Math.abs(deltaX) < 1 &&
+
+            Math.abs(deltaY) < 1
+
+        ) {
+
+            return;
+
+        }
+
+
+
+        // ====================================================
+        // INVERT
+        //
+        // Move the card visually back to its old position.
+        // ====================================================
+
+        card.style.transition = "none";
+
+
+        card.style.transform =
+
+            `translate(${deltaX}px, ${deltaY}px)`;
+
+
+
+        // ====================================================
+        // FORCE BROWSER REFLOW
+        // ====================================================
+
+        card.getBoundingClientRect();
+
+
+
+        // ====================================================
+        // PLAY
+        //
+        // Animate transform back to zero.
+        // ====================================================
+
+        requestAnimationFrame(() => {
+
+
+            card.style.transition =
+
+                `transform ${FLIP_ANIMATION_DURATION}ms cubic-bezier(0.22, 1, 0.36, 1)`;
+
+
+            card.style.transform =
+
+                "translate(0px, 0px)";
+
+
+
+            // =================================================
+            // CLEAN INLINE STYLES AFTER ANIMATION
+            // =================================================
+
+            setTimeout(() => {
+
+
+                if (!card.isConnected) return;
+
+
+                card.style.transition = "";
+
+                card.style.transform = "";
+
+
+            }, FLIP_ANIMATION_DURATION);
+
+        });
+
+    });
+
+}
+
+
+
+// ============================================================
 // APPLY AI RESULTS TO YOUTUBE
 // ============================================================
 
 function applyFiltersToDOM(
+
     rankedVideos,
+
     elementMap
+
 ) {
 
+
     console.log(
-        "Applying AI filtering..."
+
+        "Applying AI filtering with FLIP animation..."
+
     );
+
+
+
+    // ========================================================
+    // FIND ALL CARDS THAT WILL BE REMOVED
+    // ========================================================
+
+    const cardsToRemove = [];
 
 
     rankedVideos.forEach((video) => {
 
 
-        // Find actual YouTube HTML card
+        if (video.action !== "Hide") return;
+
 
         const element =
+
             elementMap.get(video.video_id);
 
 
         if (!element) return;
 
 
+        if (!element.isConnected) return;
 
-        // Remove previous styling
 
-        element.classList.remove(
-            "smartfeed-ai-match",
-            "smartfeed-ai-hide"
+        cardsToRemove.push(
+
+            {
+
+                video: video,
+
+                element: element
+
+            }
+
         );
 
+    });
 
-        const oldBadge =
-            element.querySelector(
-                ".smartfeed-ai-badge"
-            );
+
+
+    // ========================================================
+    // RECORD POSITIONS BEFORE REMOVAL
+    //
+    // FLIP:
+    // FIRST
+    // ========================================================
+
+    const currentCards = getCurrentVideoCards();
+
+
+    const oldPositions = recordCardPositions(
+
+        currentCards
+
+    );
+
+
+
+    // ========================================================
+    // ADD BADGES TO ACCEPTED VIDEOS
+    // ========================================================
+
+    rankedVideos.forEach((video) => {
+
+
+        if (video.action === "Hide") return;
+
+
+        const element =
+
+            elementMap.get(video.video_id);
+
+
+        if (!element) return;
+
+
+        if (!element.isConnected) return;
+
+
+
+        const confidence =
+
+            (video.confidence * 100)
+
+                .toFixed(1);
+
+
+
+        // ====================================================
+        // REMOVE OLD BADGE
+        // ====================================================
+
+        const oldBadge = element.querySelector(
+
+            ".smartfeed-ai-badge"
+
+        );
 
 
         if (oldBadge) {
@@ -417,86 +737,171 @@ function applyFiltersToDOM(
 
 
         // ====================================================
-        // HIDE VIDEO
+        // CREATE BADGE
         // ====================================================
-
-        if (video.action === "Hide") {
-
-            element.classList.add(
-                "smartfeed-ai-hide"
-            );
-
-
-            element.style.opacity =
-                "0.16";
-
-
-            element.style.pointerEvents =
-                "none";
-
-
-            element.title =
-                "Filtered out by SmartFeed AI";
-
-
-            return;
-
-        }
-
-
-
-        // ====================================================
-        // SHOW VIDEO
-        // ====================================================
-
-        const confidence =
-            (video.confidence * 100)
-                .toFixed(1);
-
-
-
-        // Create AI Match Badge
 
         const badge =
+
             document.createElement("div");
 
 
         badge.className =
+
             "smartfeed-ai-badge";
 
 
         badge.textContent =
+
             `${video.topic} match ${confidence}%`;
 
 
 
-        // Add match styling
+        // ====================================================
+        // ADD MATCH STYLING
+        // ====================================================
 
         element.classList.add(
+
             "smartfeed-ai-match"
+
         );
 
 
-        element.style.opacity =
-            "1";
+        element.style.opacity = "1";
 
-
-        element.style.pointerEvents =
-            "auto";
+        element.style.pointerEvents = "auto";
 
 
         element.title =
+
             `AI Match: ${video.topic} (${confidence}%)`;
 
 
-
-        // Add badge to video card
-
         element.prepend(
+
             badge
+
         );
 
     });
+
+
+
+    // ========================================================
+    // NO CARDS NEED REMOVAL
+    // ========================================================
+
+    if (cardsToRemove.length === 0) {
+
+        console.log(
+
+            "No videos need to be removed."
+
+        );
+
+        return;
+
+    }
+
+
+
+    // ========================================================
+    // START REMOVAL ANIMATION
+    // ========================================================
+
+    cardsToRemove.forEach((item) => {
+
+
+        console.log(
+
+            `Animating removal: ${item.video.title}`
+
+        );
+
+
+        item.element.classList.add(
+
+            "smartfeed-ai-removing"
+
+        );
+
+    });
+
+
+
+    // ========================================================
+    // WAIT FOR FADE ANIMATION
+    // ========================================================
+
+    setTimeout(() => {
+
+
+        // ====================================================
+        // REMOVE REJECTED CARDS
+        //
+        // FLIP:
+        // LAST
+        // ====================================================
+
+        cardsToRemove.forEach((item) => {
+
+
+            if (item.element.isConnected) {
+
+
+                item.element.remove();
+
+
+                console.log(
+
+                    `Removed video: ${item.video.title}`
+
+                );
+
+            }
+
+        });
+
+
+
+        // ====================================================
+        // WAIT FOR YOUTUBE / BROWSER LAYOUT
+        // ====================================================
+
+        requestAnimationFrame(() => {
+
+
+            requestAnimationFrame(() => {
+
+
+                // ============================================
+                // GET REMAINING CARDS
+                // ============================================
+
+                const remainingCards =
+
+                    getCurrentVideoCards();
+
+
+
+                // ============================================
+                // RUN FLIP ANIMATION
+                // ============================================
+
+                animateCardRearrangement(
+
+                    oldPositions,
+
+                    remainingCards
+
+                );
+
+            });
+
+        });
+
+
+    }, REMOVE_ANIMATION_DURATION);
 
 }
 
@@ -509,12 +914,14 @@ function applyFiltersToDOM(
 function injectSmartFeedStyles() {
 
 
-    // Don't inject styles multiple times
-
     if (
+
         document.getElementById(
+
             AI_CARD_STYLE_ID
+
         )
+
     ) {
 
         return;
@@ -524,10 +931,12 @@ function injectSmartFeedStyles() {
 
 
     const style =
+
         document.createElement("style");
 
 
     style.id =
+
         AI_CARD_STYLE_ID;
 
 
@@ -563,22 +972,25 @@ function injectSmartFeedStyles() {
                     rgba(15, 23, 42, 0.02)
                 );
 
-            transition:
-                opacity 180ms ease,
-                transform 180ms ease,
-                box-shadow 180ms ease;
-
         }
 
+
+
+        /* ================================================
+           AI MATCHED VIDEO HOVER
+        ================================================= */
 
 
         ytd-rich-item-renderer.smartfeed-ai-match:hover {
 
             transform:
+
                 translateY(-2px);
 
             box-shadow:
+
                 0 24px 44px
+
                 rgba(14, 165, 233, 0.22);
 
         }
@@ -586,18 +998,37 @@ function injectSmartFeedStyles() {
 
 
         /* ================================================
-           AI HIDDEN VIDEO
+           VIDEO REMOVAL ANIMATION
         ================================================= */
 
 
-        ytd-rich-item-renderer.smartfeed-ai-hide {
+        ytd-rich-item-renderer.smartfeed-ai-removing {
+
+            opacity: 0 !important;
+
+            transform:
+
+                scale(0.82)
+
+                translateY(20px) !important;
 
             filter:
-                grayscale(0.85);
+
+                blur(5px)
+
+                grayscale(0.9);
+
+            pointer-events:
+
+                none;
 
             transition:
-                opacity 180ms ease,
-                filter 180ms ease;
+
+                opacity ${REMOVE_ANIMATION_DURATION}ms ease,
+
+                transform ${REMOVE_ANIMATION_DURATION}ms ease,
+
+                filter ${REMOVE_ANIMATION_DURATION}ms ease;
 
         }
 
@@ -611,47 +1042,65 @@ function injectSmartFeedStyles() {
         .smartfeed-ai-badge {
 
             margin:
+
                 0 0 10px;
 
             display:
+
                 inline-flex;
 
             align-items:
+
                 center;
 
             padding:
+
                 7px 12px;
 
             border-radius:
+
                 999px;
 
             font-size:
+
                 11px;
 
             font-weight:
+
                 700;
 
             letter-spacing:
+
                 0.04em;
 
             text-transform:
+
                 uppercase;
 
             color:
+
                 #dffbff;
 
             background:
+
                 linear-gradient(
+
                     135deg,
+
                     rgba(8, 145, 178, 0.92),
+
                     rgba(14, 116, 144, 0.92)
+
                 );
 
             box-shadow:
+
                 0 10px 24px
+
                 rgba(8, 145, 178, 0.28);
 
             width:
+
                 fit-content;
 
         }
@@ -662,7 +1111,9 @@ function injectSmartFeedStyles() {
 
 
     document.head.appendChild(
+
         style
+
     );
 
 }
@@ -674,28 +1125,29 @@ function injectSmartFeedStyles() {
 // ============================================================
 
 const observer =
+
     new MutationObserver(() => {
 
 
-        // Cancel previous timer
-
         clearTimeout(
+
             processTimer
+
         );
 
 
 
-        // Wait until YouTube stops changing DOM
-
         processTimer =
+
             setTimeout(() => {
 
 
-                // Only process YouTube homepage
-
                 if (
+
                     window.location.pathname === "/"
+
                 ) {
+
 
                     extractAndProcessVideos();
 
@@ -708,10 +1160,10 @@ const observer =
 
 
 
-// Start watching YouTube page
-
 observer.observe(
+
     document.body,
+
     {
 
         childList: true,
@@ -719,6 +1171,7 @@ observer.observe(
         subtree: true
 
     }
+
 );
 
 
@@ -728,6 +1181,9 @@ observer.observe(
 // ============================================================
 
 setTimeout(
+
     extractAndProcessVideos,
+
     2000
+
 );

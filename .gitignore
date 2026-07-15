@@ -1,16 +1,29 @@
-# Python Virtual Environment
+# Python Virtual Environments
 venv/
+.venv/
 env/
+**/venv/
+**/.venv/
+**/env/
 
 # Python Cache
 __pycache__/
+**/__pycache__/
 *.pyc
 *.pyo
 *.pyd
+.pytest_cache/
+**/.pytest_cache/
 
-# Environment Variables (Keep secrets safe!)
+# Environment Variables and Local Secrets
 .env
+*.env
+**/.env
 
-# OS generated files
+# Logs
+*.log
+
+# Editor / OS files
+.vscode/
 .DS_Store
 Thumbs.db

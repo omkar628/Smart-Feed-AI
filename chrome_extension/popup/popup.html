@@ -6,54 +6,67 @@
   <title>SmartFeed AI</title>
   <link rel="stylesheet" href="popup.css">
 </head>
-<body>
+<body data-theme="deep-focus">
   <main class="popup-shell">
-    <section class="hero-card">
-      <p class="eyebrow">SmartFeed AI</p>
-      <h1>Shape your YouTube homepage</h1>
-      <p class="hero-copy">Choose the topics you want more of and assign each one a share of your feed.</p>
-    </section>
+    <header class="popup-header">
+      <div class="header-copy">
+        <p class="eyebrow">SmartFeed AI</p>
+        <h1>Shape your feed around what matters.</h1>
+      </div>
 
-    <section class="panel">
-      <div class="panel-header">
+      <label class="theme-toggle" for="theme-toggle-input" aria-label="Switch between Deep Focus and Zen Space themes">
+        <input id="theme-toggle-input" class="theme-toggle-input" type="checkbox">
+        <span class="theme-toggle-track">
+          <span class="theme-toggle-label theme-toggle-label-dark">Deep Focus</span>
+          <span class="theme-toggle-label theme-toggle-label-light">Zen Space</span>
+          <span class="theme-toggle-thumb" aria-hidden="true"></span>
+        </span>
+      </label>
+    </header>
+
+    <section class="panel" aria-labelledby="preferences-heading">
+      <div class="section-heading">
         <div>
-          <h2>Interest Mix</h2>
-          <p>Keep your total at exactly 100%.</p>
+          <h2 id="preferences-heading">Your feed</h2>
+          <p>Choose what you want to see.</p>
         </div>
         <button id="add-topic-btn" class="ghost-button" type="button">Add topic</button>
       </div>
 
-      <div class="summary-card">
-        <div class="summary-row">
-          <span>Total allocation</span>
-          <strong id="allocation-total">0%</strong>
-        </div>
-        <div class="progress-track" aria-hidden="true">
-          <div id="allocation-bar" class="progress-bar"></div>
-        </div>
-        <p id="allocation-hint" class="allocation-hint">Add your topics and balance them to 100%.</p>
-      </div>
-
-      <div id="topics-container" class="topics-list"></div>
+      <div id="topics-container" class="topics-list" aria-label="Interest preference list"></div>
 
       <template id="topic-row-template">
         <div class="topic-row">
-          <div class="topic-fields">
-            <label>
-              <span>Topic</span>
-              <input type="text" class="topic-name" placeholder="Programming, UPSC, Football...">
-            </label>
-            <label class="weight-field">
-              <span>Share</span>
-              <div class="weight-input-wrap">
-                <input type="number" class="topic-weight" min="0" max="100" placeholder="0">
-                <span>%</span>
-              </div>
-            </label>
-          </div>
+          <label class="topic-field">
+            <span class="field-label">Topic</span>
+            <input type="text" class="topic-name" placeholder="Programming, UPSC, Football">
+          </label>
+
+          <label class="weight-field">
+            <span class="field-label">Weight</span>
+            <div class="weight-input-wrap">
+              <input type="number" class="topic-weight" min="0" max="100" placeholder="0">
+              <span>%</span>
+            </div>
+          </label>
+
           <button class="icon-button remove-topic-btn" type="button" aria-label="Remove topic">Remove</button>
         </div>
       </template>
+
+      <section id="allocation-summary" class="allocation-summary" aria-labelledby="allocation-heading">
+        <div class="allocation-row">
+          <div>
+            <h3 id="allocation-heading">Total allocation</h3>
+            <p id="allocation-hint" class="allocation-hint">Add your topics and balance them to 100%.</p>
+          </div>
+          <strong id="allocation-total">0%</strong>
+        </div>
+
+        <div class="progress-track" aria-hidden="true">
+          <div id="allocation-bar" class="progress-bar"></div>
+        </div>
+      </section>
 
       <div id="status" class="status-message" role="status" aria-live="polite"></div>
 

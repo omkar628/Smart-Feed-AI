@@ -9,66 +9,128 @@ class AIRanker:
 
         print("Loading AI Models...")
 
-        # Stage 1: Fast semantic retrieval
+        # ========================================================
+        # STAGE 1: BGE EMBEDDING MODEL
+        # ========================================================
+
         self.model = SentenceTransformer(
             "BAAI/bge-base-en-v1.5"
         )
 
-        # Stage 2: More accurate relevance checking
+        # ========================================================
+        # STAGE 2: CROSS-ENCODER
+        # ========================================================
+
         self.cross_encoder = CrossEncoder(
             "cross-encoder/ms-marco-MiniLM-L6-v2"
         )
 
-        # IMPORTANT:
-        # This threshold is still ONLY being used for the BGE score.
-        # We are not using the Cross-Encoder for filtering yet.
-        self.threshold = 0.35
+        # ========================================================
+        # ACCEPTANCE THRESHOLDS
+        # ========================================================
+        #
+        # A video must pass BOTH thresholds.
+        #
+        # BGE:
+        # Broad semantic similarity / candidate retrieval.
+        #
+        # Cross-Encoder:
+        # More detailed relevance verification.
+        #
+        # ========================================================
 
-        # Number of strongest concept matches used for BGE score.
+        self.bge_threshold = 0.50
+
+        self.cross_encoder_threshold = -7.0
+
+        # Number of strongest BGE concepts sent
+        # to the Cross-Encoder.
+
         self.top_k = 3
+
+        # Groq preference expander.
 
         self.expander = PreferenceExpander()
 
-        # In-memory preference cache.
+        # ========================================================
+        # CACHE COMPLETE PREFERENCE SETS
+        # ========================================================
+
         self.preference_cache = {}
 
 
     # ============================================================
-    # GET EXPANDED CONCEPTS
+    # GET ALL EXPANDED PREFERENCES
     # ============================================================
 
-    def get_expanded_preference(self, preference):
+    def get_expanded_preferences(self, preferences):
 
-        if preference in self.preference_cache:
+        # Create stable cache key.
 
-            print(f"Using cached preference: {preference}")
+        cache_key = tuple(
 
-            return self.preference_cache[preference]
+            sorted(
 
+                preferences,
 
-        print(f"Expanding new preference: {preference}")
+                key=str.lower
 
+            )
 
-        concepts = self.expander.expand_preference(
-            preference
         )
 
 
-        self.preference_cache[preference] = concepts
+        # ========================================================
+        # CHECK CACHE
+        # ========================================================
+
+        if cache_key in self.preference_cache:
+
+            print(
+
+                f"Using cached preference set: "
+                f"{list(cache_key)}"
+
+            )
+
+            return self.preference_cache[cache_key]
 
 
-        print(f"\nEXPANDED {preference}:")
+        # ========================================================
+        # CALL GROQ ONCE FOR ALL PREFERENCES
+        # ========================================================
+
+        print(
+
+            f"Expanding preference set: "
+            f"{preferences}"
+
+        )
 
 
-        for concept in concepts:
+        expanded_preferences = (
 
-            print(f"  - {concept}")
+            self.expander.expand_preferences(
+
+                preferences
+
+            )
+
+        )
 
 
-        print()
+        # ========================================================
+        # SAVE RESULT IN CACHE
+        # ========================================================
+
+        self.preference_cache[cache_key] = (
+
+            expanded_preferences
+
+        )
 
 
-        return concepts
+        return expanded_preferences
 
 
     # ============================================================
@@ -89,8 +151,11 @@ class AIRanker:
         video_texts = [
 
             (
+
                 f"Title: {video['title']}. "
+
                 f"Channel: {video['channel']}."
+
             )
 
             for video in videos
@@ -103,12 +168,29 @@ class AIRanker:
         # ========================================================
 
         interest_topics = list(
+
             interests.keys()
+
         )
 
 
         # ========================================================
-        # 3. GENERATE VIDEO EMBEDDINGS
+        # 3. EXPAND ALL PREFERENCES
+        # ========================================================
+
+        expanded_preferences = (
+
+            self.get_expanded_preferences(
+
+                interest_topics
+
+            )
+
+        )
+
+
+        # ========================================================
+        # 4. GENERATE VIDEO EMBEDDINGS
         # ========================================================
 
         video_embeddings = self.model.encode(
@@ -121,7 +203,7 @@ class AIRanker:
 
 
         # ========================================================
-        # 4. PREPARE CONCEPT EMBEDDINGS
+        # 5. PREPARE CONCEPT EMBEDDINGS
         # ========================================================
 
         topic_data = {}
@@ -129,16 +211,14 @@ class AIRanker:
 
         for topic in interest_topics:
 
+            concepts = expanded_preferences.get(
 
-            # Get expanded concepts from Groq.
+                topic,
 
-            concepts = self.get_expanded_preference(
-                topic
+                [topic]
+
             )
 
-
-            # Generate separate embedding
-            # for every concept.
 
             concept_embeddings = self.model.encode(
 
@@ -159,7 +239,7 @@ class AIRanker:
 
 
         # ========================================================
-        # 5. CREATE CATEGORY BUCKETS
+        # 6. CREATE CATEGORY BUCKETS
         # ========================================================
 
         categorized_videos = {
@@ -175,14 +255,15 @@ class AIRanker:
 
 
         # ========================================================
-        # 6. ANALYZE EACH VIDEO
+        # 7. ANALYZE EVERY VIDEO
         # ========================================================
 
         for video_index, video in enumerate(videos):
 
-
             video_embedding = video_embeddings[
+
                 video_index
+
             ]
 
 
@@ -190,23 +271,28 @@ class AIRanker:
 
 
             # ====================================================
-            # COMPARE VIDEO AGAINST EVERY INTEREST
+            # COMPARE VIDEO AGAINST EVERY USER INTEREST
             # ====================================================
 
             for topic in interest_topics:
 
-
                 concepts = topic_data[
+
                     topic
+
                 ]["concepts"]
 
 
                 concept_embeddings = topic_data[
+
                     topic
+
                 ]["embeddings"]
 
 
-                # BGE cosine similarity.
+                # =================================================
+                # BGE COSINE SIMILARITY
+                # =================================================
 
                 similarity_scores = util.cos_sim(
 
@@ -218,11 +304,13 @@ class AIRanker:
 
 
                 # =================================================
-                # FIND TOP-3 STRONGEST CONCEPT MATCHES
+                # FIND TOP-K CONCEPTS
                 # =================================================
 
                 number_of_scores = len(
+
                     similarity_scores
+
                 )
 
 
@@ -245,7 +333,7 @@ class AIRanker:
 
 
                 # =================================================
-                # WEIGHTED TOP-3 SCORE
+                # WEIGHTED TOP-K BGE SCORE
                 # =================================================
 
                 weights = torch.tensor(
@@ -277,7 +365,7 @@ class AIRanker:
 
 
                 # =================================================
-                # SAVE STRONGEST MATCHED CONCEPTS
+                # SAVE STRONGEST CONCEPTS
                 # =================================================
 
                 matched_concepts = [
@@ -285,10 +373,18 @@ class AIRanker:
                     {
 
                         "concept":
+
                             concepts[index.item()],
 
                         "score":
-                            round(score.item(), 3)
+
+                            round(
+
+                                score.item(),
+
+                                3
+
+                            )
 
                     }
 
@@ -306,16 +402,18 @@ class AIRanker:
                 topic_scores[topic] = {
 
                     "score":
+
                         final_topic_score,
 
                     "matched_concepts":
+
                         matched_concepts
 
                 }
 
 
             # ====================================================
-            # 7. FIND BEST TOPIC USING BGE
+            # 8. FIND BEST TOPIC USING BGE
             # ====================================================
 
             best_topic = max(
@@ -323,42 +421,29 @@ class AIRanker:
                 topic_scores,
 
                 key=lambda topic:
+
                     topic_scores[topic]["score"]
 
             )
 
 
             best_score = topic_scores[
+
                 best_topic
+
             ]["score"]
 
 
             best_concepts = topic_scores[
+
                 best_topic
+
             ]["matched_concepts"]
 
 
             # ====================================================
-            # 8. CROSS-ENCODER RELEVANCE CHECK
+            # 9. PREPARE VIDEO TEXT FOR CROSS-ENCODER
             # ====================================================
-
-            # Get ALL expanded concepts belonging
-            # to the topic selected by BGE.
-
-            best_topic_concepts = topic_data[
-                best_topic
-            ]["concepts"]
-
-
-            # Convert the concepts into one
-            # readable topic description.
-
-            topic_description = ", ".join(
-                best_topic_concepts
-            )
-
-
-            # Prepare video information.
 
             video_text = (
 
@@ -369,70 +454,150 @@ class AIRanker:
             )
 
 
-            # Create the text pair.
+            # ====================================================
+            # 10. CREATE CROSS-ENCODER PAIRS
+            # ====================================================
 
-            cross_encoder_pair = [
+            cross_encoder_pairs = [
 
                 (
 
                     video_text,
 
-                    topic_description
+                    match["concept"]
 
                 )
+
+                for match in best_concepts
 
             ]
 
 
-            # Get raw Cross-Encoder relevance score.
+            # ====================================================
+            # 11. RUN CROSS-ENCODER
+            # ====================================================
 
-            cross_encoder_score = (
+            cross_encoder_scores = (
 
                 self.cross_encoder.predict(
 
-                    cross_encoder_pair
+                    cross_encoder_pairs
 
-                )[0]
+                )
 
-            )
-
-
-            cross_encoder_score = float(
-                cross_encoder_score
             )
 
 
             # ====================================================
-            # 9. SHOW DEBUG INFORMATION
+            # 12. SAVE CROSS-ENCODER RESULTS
+            # ====================================================
+
+            cross_encoder_results = []
+
+
+            for match, score in zip(
+
+                best_concepts,
+
+                cross_encoder_scores
+
+            ):
+
+                cross_encoder_results.append({
+
+                    "concept":
+
+                        match["concept"],
+
+                    "bge_score":
+
+                        match["score"],
+
+                    "cross_encoder_score":
+
+                        float(score)
+
+                })
+
+
+            # ====================================================
+            # 13. FIND BEST CROSS-ENCODER RESULT
+            # ====================================================
+
+            best_cross_encoder_result = max(
+
+                cross_encoder_results,
+
+                key=lambda result:
+
+                    result["cross_encoder_score"]
+
+            )
+
+
+            best_cross_encoder_score = (
+
+                best_cross_encoder_result[
+
+                    "cross_encoder_score"
+
+                ]
+
+            )
+
+
+            best_cross_encoder_concept = (
+
+                best_cross_encoder_result[
+
+                    "concept"
+
+                ]
+
+            )
+
+
+            # ====================================================
+            # 14. SHOW DEBUG INFORMATION
             # ====================================================
 
             print("\n" + "=" * 70)
 
 
             print(
+
                 f"VIDEO: {video['title']}"
+
             )
 
 
             print(
+
                 f"BGE BEST TOPIC: {best_topic}"
+
             )
 
 
             print(
+
                 f"BGE WEIGHTED SCORE: "
                 f"{best_score:.3f}"
+
             )
 
 
             print(
-                f"CROSS-ENCODER SCORE: "
-                f"{cross_encoder_score:.3f}"
+
+                f"BGE THRESHOLD: "
+                f"{self.bge_threshold:.3f}"
+
             )
 
 
             print(
-                "MATCHED CONCEPTS:"
+
+                "\nBGE MATCHED CONCEPTS:"
+
             )
 
 
@@ -447,19 +612,116 @@ class AIRanker:
                 )
 
 
+            print(
+
+                "\nCROSS-ENCODER RESULTS:"
+
+            )
+
+
+            for result in cross_encoder_results:
+
+                print(
+
+                    f"   {result['concept']}"
+
+                    f" → "
+
+                    f"{result['cross_encoder_score']:.3f}"
+
+                )
+
+
+            print(
+
+                f"\nBEST CROSS-ENCODER CONCEPT: "
+
+                f"{best_cross_encoder_concept}"
+
+            )
+
+
+            print(
+
+                f"BEST CROSS-ENCODER SCORE: "
+
+                f"{best_cross_encoder_score:.3f}"
+
+            )
+
+
+            print(
+
+                f"CROSS-ENCODER THRESHOLD: "
+
+                f"{self.cross_encoder_threshold:.3f}"
+
+            )
+
+
             # ====================================================
-            # 10. CATEGORIZE VIDEO
-            # ====================================================
-            #
-            # IMPORTANT:
-            #
-            # We are STILL using the BGE score here.
-            #
-            # We first need to observe Cross-Encoder scores
-            # before deciding its threshold.
+            # 15. CHECK BOTH THRESHOLDS
             # ====================================================
 
-            if best_score >= self.threshold:
+            passed_bge = (
+
+                best_score >= self.bge_threshold
+
+            )
+
+
+            passed_cross_encoder = (
+
+                best_cross_encoder_score
+
+                >=
+
+                self.cross_encoder_threshold
+
+            )
+
+
+            print(
+
+                f"\nBGE CHECK: "
+
+                f"{'PASS' if passed_bge else 'FAIL'}"
+
+            )
+
+
+            print(
+
+                f"CROSS-ENCODER CHECK: "
+
+                f"{'PASS' if passed_cross_encoder else 'FAIL'}"
+
+            )
+
+
+            # ====================================================
+            # 16. FINAL ACCEPTANCE DECISION
+            # ====================================================
+            #
+            # BOTH models must agree.
+            #
+            # BGE FAIL → UNKNOWN
+            #
+            # Cross-Encoder FAIL → UNKNOWN
+            #
+            # BOTH PASS → ACCEPTED
+            #
+            # ====================================================
+
+            if (
+
+                passed_bge
+
+                and
+
+                passed_cross_encoder
+
+            ):
 
 
                 video_data = {
@@ -467,29 +729,59 @@ class AIRanker:
                     **video,
 
                     "topic":
+
                         best_topic,
 
                     "confidence":
-                        round(best_score, 3),
+
+                        round(
+
+                            best_score,
+
+                            3
+
+                        ),
 
                     "cross_encoder_score":
-                        round(cross_encoder_score, 3),
+
+                        round(
+
+                            best_cross_encoder_score,
+
+                            3
+
+                        ),
+
+                    "cross_encoder_concept":
+
+                        best_cross_encoder_concept,
+
+                    "cross_encoder_results":
+
+                        cross_encoder_results,
 
                     "matched_concepts":
+
                         best_concepts
 
                 }
 
 
                 categorized_videos[
+
                     best_topic
+
                 ].append(
+
                     video_data
+
                 )
 
 
                 print(
-                    "RESULT: ACCEPTED"
+
+                    "FINAL RESULT: ACCEPTED"
+
                 )
 
 
@@ -501,34 +793,90 @@ class AIRanker:
                     **video,
 
                     "topic":
+
                         "Unknown",
 
                     "confidence":
-                        round(best_score, 3),
+
+                        round(
+
+                            best_score,
+
+                            3
+
+                        ),
+
+                    "candidate_topic":
+
+                        best_topic,
 
                     "cross_encoder_score":
-                        round(cross_encoder_score, 3),
+
+                        round(
+
+                            best_cross_encoder_score,
+
+                            3
+
+                        ),
+
+                    "cross_encoder_concept":
+
+                        best_cross_encoder_concept,
+
+                    "cross_encoder_results":
+
+                        cross_encoder_results,
 
                     "matched_concepts":
+
                         best_concepts
 
                 }
 
 
                 categorized_videos[
+
                     "Unknown"
+
                 ].append(
+
                     video_data
+
                 )
 
 
+                # ================================================
+                # SHOW EXACT REJECTION REASON
+                # ================================================
+
+                if not passed_bge:
+
+                    print(
+
+                        "REJECTION REASON: BGE FAILED"
+
+                    )
+
+
+                elif not passed_cross_encoder:
+
+                    print(
+
+                        "REJECTION REASON: CROSS-ENCODER FAILED"
+
+                    )
+
+
                 print(
-                    "RESULT: UNKNOWN"
+
+                    "FINAL RESULT: UNKNOWN"
+
                 )
 
 
         # ========================================================
-        # 11. APPLY USER PERCENTAGE DISTRIBUTION
+        # 17. APPLY USER PERCENTAGE DISTRIBUTION
         # ========================================================
 
         total_visible = len(videos)
@@ -539,7 +887,6 @@ class AIRanker:
 
         for topic, percentage in interests.items():
 
-
             target_count = int(
 
                 total_visible *
@@ -549,24 +896,43 @@ class AIRanker:
             )
 
 
-            # Sort by BGE score for now.
+            # ====================================================
+            # SORT ACCEPTED VIDEOS
+            # ====================================================
+            #
+            # Primary sorting:
+            # BGE confidence.
+            #
+            # Secondary sorting:
+            # Cross-Encoder score.
+            #
+            # ====================================================
 
             topic_videos = sorted(
 
                 categorized_videos[topic],
 
-                key=lambda video:
+                key=lambda video: (
+
                     video["confidence"],
+
+                    video["cross_encoder_score"]
+
+                ),
 
                 reverse=True
 
             )
 
 
-            # Videos inside percentage limit.
+            # ====================================================
+            # VIDEOS INSIDE PERCENTAGE LIMIT
+            # ====================================================
 
             accepted = topic_videos[
+
                 :target_count
+
             ]
 
 
@@ -575,14 +941,20 @@ class AIRanker:
                 video["action"] = "Show"
 
                 final_feed.append(
+
                     video
+
                 )
 
 
-            # Videos exceeding percentage limit.
+            # ====================================================
+            # VIDEOS EXCEEDING PERCENTAGE LIMIT
+            # ====================================================
 
             rejected = topic_videos[
+
                 target_count:
+
             ]
 
 
@@ -591,22 +963,24 @@ class AIRanker:
                 video["action"] = "Hide"
 
                 final_feed.append(
+
                     video
+
                 )
 
 
         # ========================================================
-        # 12. HIDE UNKNOWN VIDEOS
+        # 18. HIDE UNKNOWN VIDEOS
         # ========================================================
 
-        for video in categorized_videos[
-            "Unknown"
-        ]:
+        for video in categorized_videos["Unknown"]:
 
             video["action"] = "Hide"
 
             final_feed.append(
+
                 video
+
             )
 
 

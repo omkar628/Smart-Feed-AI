@@ -1,12 +1,18 @@
 document.addEventListener("DOMContentLoaded", () => {
+    const body = document.body;
     const saveBtn = document.getElementById("save-btn");
     const addTopicBtn = document.getElementById("add-topic-btn");
+    const themeToggleInput = document.getElementById("theme-toggle-input");
     const topicsContainer = document.getElementById("topics-container");
     const topicTemplate = document.getElementById("topic-row-template");
+    const allocationSummary = document.getElementById("allocation-summary");
     const allocationTotal = document.getElementById("allocation-total");
     const allocationBar = document.getElementById("allocation-bar");
     const allocationHint = document.getElementById("allocation-hint");
     const statusMsg = document.getElementById("status");
+    const THEME_STORAGE_KEY = "popupTheme";
+    const THEME_DEEP_FOCUS = "deep-focus";
+    const THEME_ZEN_SPACE = "zen-space";
 
     const defaultTopics = [
         { topic: "JEE Advanced", weight: 50 },
@@ -18,9 +24,22 @@ document.addEventListener("DOMContentLoaded", () => {
         statusMsg.textContent = message;
         statusMsg.className = "status-message";
 
-        if (type) {
+        if (message) {
+            statusMsg.classList.add("visible");
+        }
+
+        if (type && message) {
             statusMsg.classList.add(type);
         }
+    }
+
+    function applyTheme(themeName) {
+        const theme = themeName === THEME_ZEN_SPACE
+            ? THEME_ZEN_SPACE
+            : THEME_DEEP_FOCUS;
+
+        body.dataset.theme = theme;
+        themeToggleInput.checked = theme === THEME_ZEN_SPACE;
     }
 
     function getRows() {
@@ -37,19 +56,17 @@ document.addEventListener("DOMContentLoaded", () => {
         const clampedTotal = Math.max(0, Math.min(total, 100));
         allocationTotal.textContent = `${total}%`;
         allocationBar.style.width = `${clampedTotal}%`;
+        saveBtn.disabled = total !== 100;
 
         if (total === 100) {
-            allocationBar.style.background = "linear-gradient(90deg, #34d399, #67e8f9)";
+            allocationSummary.dataset.state = "valid";
             allocationHint.textContent = "Perfect balance. Your feed is ready to save.";
-            allocationHint.style.color = "#4ade80";
         } else if (total < 100) {
-            allocationBar.style.background = "linear-gradient(90deg, #67e8f9, #38bdf8)";
+            allocationSummary.dataset.state = "under";
             allocationHint.textContent = `${100 - total}% left to assign.`;
-            allocationHint.style.color = "";
         } else {
-            allocationBar.style.background = "linear-gradient(90deg, #fb7185, #f59e0b)";
+            allocationSummary.dataset.state = "over";
             allocationHint.textContent = `${total - 100}% over the limit. Reduce a few shares.`;
-            allocationHint.style.color = "#fda4af";
         }
     }
 
@@ -94,6 +111,14 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     addTopicBtn.addEventListener("click", () => addTopicRow());
+    themeToggleInput.addEventListener("change", () => {
+        const nextTheme = themeToggleInput.checked
+            ? THEME_ZEN_SPACE
+            : THEME_DEEP_FOCUS;
+
+        applyTheme(nextTheme);
+        chrome.storage.local.set({ [THEME_STORAGE_KEY]: nextTheme });
+    });
 
     saveBtn.addEventListener("click", () => {
         const rows = getRows();
@@ -137,7 +162,9 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     });
 
-    chrome.storage.local.get(["userInterests"], (result) => {
+    chrome.storage.local.get(["userInterests", THEME_STORAGE_KEY], (result) => {
+        applyTheme(result[THEME_STORAGE_KEY]);
+
         const savedInterests = result.userInterests
             ? Object.entries(result.userInterests).map(([topic, weight]) => ({ topic, weight }))
             : defaultTopics;
