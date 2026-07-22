@@ -2,7 +2,7 @@
 
 SmartFeed AI is a Chrome extension backed by a FastAPI service that reshapes the YouTube home feed around the topics a user actually cares about.
 
-Instead of relying on exact keyword matches, the system expands user interests into related concepts, compares those concepts against live YouTube recommendations with semantic embeddings, and keeps the videos that best match the user's weighted preference mix.
+Instead of relying on exact keyword matches, the system expands selected interests into related concepts, compares those concepts against live YouTube recommendations with semantic embeddings, and keeps the videos with the strongest semantic relevance.
 
 ## Overview
 
@@ -10,12 +10,12 @@ Most recommendation filters break down when the wording in a video title does no
 
 The product flow is simple:
 
-1. The user creates a topic mix inside the Chrome extension, such as `programming 80%`, `music 10%`, and `editing 10%`.
+1. The user selects topics inside the Chrome extension, such as `Programming`, `AI`, and `Startups`.
 2. The extension reads visible cards from the YouTube home feed.
 3. The backend expands each topic into related concepts using Groq.
 4. Video metadata and expanded concepts are embedded with `BAAI/bge-base-en-v1.5`.
 5. Each video is assigned to the strongest matching topic.
-6. Low-confidence matches are removed, and accepted cards are labeled with an AI match badge.
+6. Low-confidence matches are removed, and accepted cards are returned in global confidence order.
 
 The result is a more intentional home feed that reflects what the user wants to see right now.
 
@@ -29,27 +29,29 @@ This makes the extension especially useful for focused browsing sessions such as
 
 ## Key Features
 
-- Weighted interest-based filtering for the YouTube home feed
+- Selected-topic filtering for the YouTube home feed
 - Semantic topic matching instead of raw keyword comparison
 - Groq-powered preference expansion for richer topic coverage
 - FastAPI backend for ranking and classification
-- Chrome extension popup for saving a custom topic mix
+- Chrome extension popup for saving selected topics
 - Visual AI match badges for accepted videos
-- Automatic removal of low-relevance or out-of-distribution videos
+- Automatic removal of low-relevance videos
 - Railway-ready backend deployment with Docker support
 
 ## How It Works
 
 ### 1. Preference Capture
 
-The extension popup lets the user define topics and allocate weights that add up to `100%`.
+The extension popup lets the user choose topics without assigning percentages or weights.
 
 Example:
 
-```text
-Programming: 80
-Music: 10
-Editing: 10
+```json
+[
+  "Programming",
+  "AI",
+  "Startups"
+]
 ```
 
 These preferences are stored locally in the browser and used whenever the user opens YouTube.
@@ -86,9 +88,10 @@ SmartFeed AI uses `BAAI/bge-base-en-v1.5` to encode:
 The backend then:
 
 - computes cosine similarity between videos and topics
-- applies a small bias based on the user's configured weights
 - chooses the best matching topic per video
+- keeps videos above the relevance threshold
 - hides videos below the relevance threshold
+- sorts all accepted videos globally by confidence
 
 ### 5. Feed Refinement
 
@@ -105,7 +108,7 @@ Rejected videos are removed from the page with a transition, and the remaining c
 ```text
 Chrome Extension
   |- popup/
-  |  `- collects user topics and weights
+  |  `- collects selected topics
   |- scripts/content.js
   |  `- extracts YouTube cards and applies UI changes
   `- scripts/background.js
@@ -193,7 +196,7 @@ Available endpoints:
 3. Click `Load unpacked`
 4. Select the `chrome_extension` folder
 5. Open YouTube
-6. Configure your topic mix in the extension popup
+6. Configure your selected topics in the extension popup
 
 ## API Example
 
@@ -201,11 +204,11 @@ Available endpoints:
 
 ```json
 {
-  "interests": {
-    "Programming": 80,
-    "Music": 10,
-    "Editing": 10
-  },
+  "interests": [
+    "Programming",
+    "AI",
+    "Startups"
+  ],
   "videos": [
     {
       "video_id": "abc123",
@@ -263,7 +266,7 @@ Notes:
 
 - `chrome_extension/scripts/content.js` runs on YouTube pages and processes newly loaded cards
 - `chrome_extension/scripts/background.js` tries the deployed Railway API first, then falls back to `http://localhost:8000`
-- `backend/ml.py` contains the semantic ranking logic and topic-weight biasing
+- `backend/ml.py` contains the semantic ranking and threshold logic
 - `backend/preference_expander.py` handles concept generation through Groq
 
 ## Current Scope
@@ -272,7 +275,7 @@ SmartFeed AI currently focuses on the YouTube home feed experience. It is design
 
 - keep high-confidence topic matches visible
 - remove low-confidence or off-topic recommendations
-- honor the user's weighted topic distribution
+- rank accepted videos globally by confidence
 
 It is not yet positioned as a full recommendation replacement or a cross-platform filtering system.
 
@@ -301,7 +304,6 @@ Check the following:
 
 - the extension is loaded successfully
 - your preferences were saved in the popup
-- the total topic allocation equals `100%`
 - you are on the YouTube home page
 
 ## Summary

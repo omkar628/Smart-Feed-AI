@@ -28,7 +28,7 @@
       <div class="section-heading">
         <div>
           <h2 id="preferences-heading">Your feed</h2>
-          <p>Choose what you want to see.</p>
+          <p>Choose the topics you want the AI to match semantically.</p>
         </div>
         <button id="add-topic-btn" class="ghost-button" type="button">Add topic</button>
       </div>
@@ -42,31 +42,9 @@
             <input type="text" class="topic-name" placeholder="Programming, UPSC, Football">
           </label>
 
-          <label class="weight-field">
-            <span class="field-label">Weight</span>
-            <div class="weight-input-wrap">
-              <input type="number" class="topic-weight" min="0" max="100" placeholder="0">
-              <span>%</span>
-            </div>
-          </label>
-
           <button class="icon-button remove-topic-btn" type="button" aria-label="Remove topic">Remove</button>
         </div>
       </template>
-
-      <section id="allocation-summary" class="allocation-summary" aria-labelledby="allocation-heading">
-        <div class="allocation-row">
-          <div>
-            <h3 id="allocation-heading">Total allocation</h3>
-            <p id="allocation-hint" class="allocation-hint">Add your topics and balance them to 100%.</p>
-          </div>
-          <strong id="allocation-total">0%</strong>
-        </div>
-
-        <div class="progress-track" aria-hidden="true">
-          <div id="allocation-bar" class="progress-bar"></div>
-        </div>
-      </section>
 
       <div id="status" class="status-message" role="status" aria-live="polite"></div>
 

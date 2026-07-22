@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -53,7 +53,7 @@ class AIRanker:
     def rank_videos(
         self,
         videos: Sequence[Mapping[str, object]],
-        interests: Mapping[str, int],
+        interests: Sequence[str],
     ) -> List[Dict[str, object]]:
         """Return ranked videos in the frontend-compatible response format."""
 
@@ -62,7 +62,7 @@ class AIRanker:
             return []
 
         timings: Dict[str, float] | None = {} if ENABLE_PROFILING else None
-        interest_topics = list(interests.keys())
+        interest_topics = self._normalize_interests(interests)
         if not interest_topics:
             response_start = self._profile_start()
             final_feed = self._mark_all_unknown(videos)
@@ -92,22 +92,15 @@ class AIRanker:
         best_indices, best_scores = self._compute_best_matches(
             video_embeddings,
             topic_batch,
-            interests,
         )
         self._profile_end(timings, "similarity computation", similarity_start)
 
         response_start = self._profile_start()
-        categorized_videos = self._categorize_videos(
+        final_feed = self._build_ranked_feed(
             videos,
             topic_batch,
             best_indices,
             best_scores,
-        )
-
-        final_feed = self._apply_percentage_distribution(
-            categorized_videos,
-            interests,
-            total_visible=len(videos),
         )
         self._profile_end(timings, "response generation", response_start)
         self._report_profile(timings)
@@ -217,19 +210,12 @@ class AIRanker:
         self,
         video_embeddings: torch.Tensor,
         topic_batch: TopicBatch,
-        interests: Mapping[str, int],
     ) -> Tuple[List[int], List[float]]:
         """Compute best topic indices and raw confidence scores in one pass."""
 
         with torch.inference_mode():
             similarity_matrix = torch.matmul(video_embeddings, topic_batch.topic_matrix.T)
-            interest_bias = self._build_interest_bias(
-                topic_batch.topic_names,
-                interests,
-                similarity_matrix,
-            )
-            weighted_similarity_matrix = similarity_matrix * interest_bias
-            best_indices_tensor = torch.argmax(weighted_similarity_matrix, dim=1)
+            best_indices_tensor = torch.argmax(similarity_matrix, dim=1)
             best_scores_tensor = similarity_matrix.gather(
                 1,
                 best_indices_tensor.unsqueeze(1),
@@ -237,88 +223,54 @@ class AIRanker:
 
         return best_indices_tensor.tolist(), best_scores_tensor.tolist()
 
-    def _categorize_videos(
+    def _build_ranked_feed(
         self,
         videos: Sequence[Mapping[str, object]],
         topic_batch: TopicBatch,
         best_indices: Sequence[int],
         best_scores: Sequence[float],
-    ) -> Dict[str, List[Dict[str, object]]]:
+    ) -> List[Dict[str, object]]:
         """
-        Assign each video to its best topic using precomputed tensor results.
-
-        Unknown videos are hidden later, but are classified here so the
-        distribution step can stay focused on accepted topic buckets.
+        Accept videos above the semantic threshold and rank them globally.
         """
 
-        categorized_videos = {topic: [] for topic in topic_batch.topic_names}
-        categorized_videos["Unknown"] = []
+        accepted_videos: List[Dict[str, object]] = []
+        hidden_videos: List[Dict[str, object]] = []
 
         for video, best_index, best_score in zip(videos, best_indices, best_scores):
             best_topic = topic_batch.topic_names[best_index]
 
             if best_score < self.bge_threshold:
-                categorized_videos["Unknown"].append(
+                hidden_videos.append(
                     self._build_unknown_result(
                         video,
                         confidence=best_score,
                         candidate_topic=best_topic,
+                        action="Hide",
                     )
                 )
                 continue
 
-            categorized_videos[best_topic].append(
+            accepted_videos.append(
                 self._build_accepted_result(
                     video,
                     topic=best_topic,
                     confidence=best_score,
                     matched_concepts=topic_batch.matched_concepts[best_topic],
+                    action="Show",
                 )
             )
 
-        return categorized_videos
+        accepted_videos.sort(
+            key=lambda video: float(video["confidence"]),
+            reverse=True,
+        )
+        hidden_videos.sort(
+            key=lambda video: float(video["confidence"]),
+            reverse=True,
+        )
 
-    def _apply_percentage_distribution(
-        self,
-        categorized_videos: MutableMapping[str, List[Dict[str, object]]],
-        interests: Mapping[str, int],
-        total_visible: int,
-    ) -> List[Dict[str, object]]:
-        """
-        Keep the existing percentage-distribution logic exactly:
-        - target count uses the total incoming video count
-        - each topic is handled independently
-        - videos beyond the topic quota are hidden
-        - unknown videos are always hidden
-        """
-
-        final_feed: List[Dict[str, object]] = []
-
-        for topic, percentage in interests.items():
-            target_count = int(total_visible * (percentage / 100.0))
-
-            topic_videos = sorted(
-                categorized_videos.get(topic, []),
-                key=lambda video: float(video["confidence"]),
-                reverse=True,
-            )
-
-            accepted_videos = topic_videos[:target_count]
-            rejected_videos = topic_videos[target_count:]
-
-            for video in accepted_videos:
-                video["action"] = "Show"
-                final_feed.append(video)
-
-            for video in rejected_videos:
-                video["action"] = "Hide"
-                final_feed.append(video)
-
-        for video in categorized_videos.get("Unknown", []):
-            video["action"] = "Hide"
-            final_feed.append(video)
-
-        return final_feed
+        return [*accepted_videos, *hidden_videos]
 
     def _mark_all_unknown(
         self,
@@ -367,6 +319,7 @@ class AIRanker:
         topic: str,
         confidence: float,
         matched_concepts: Sequence[str],
+        action: str,
     ) -> Dict[str, object]:
         """Shape an accepted video for the existing frontend contract."""
 
@@ -376,6 +329,7 @@ class AIRanker:
                 "topic": topic,
                 "confidence": round(confidence, 3),
                 "matched_concepts": list(matched_concepts),
+                "action": action,
             }
         )
         return result
@@ -446,23 +400,13 @@ class AIRanker:
 
         return cleaned_concepts
 
-    def _build_interest_bias(
+    def _normalize_interests(
         self,
-        topic_names: Sequence[str],
-        interests: Mapping[str, int],
-        similarity_matrix: torch.Tensor,
-    ) -> torch.Tensor:
-        """Build a small topic bias tensor for weighted topic selection."""
+        interests: Sequence[str],
+    ) -> List[str]:
+        """Normalize selected topic names for semantic ranking."""
 
-        bias_values = [
-            0.8 + (float(interests.get(topic, 0)) / 500.0)
-            for topic in topic_names
-        ]
-        return torch.tensor(
-            bias_values,
-            dtype=similarity_matrix.dtype,
-            device=similarity_matrix.device,
-        )
+        return self._clean_concepts(interests)
 
     def _profile_start(self) -> float | None:
         """Return a timer start value only when profiling is enabled."""

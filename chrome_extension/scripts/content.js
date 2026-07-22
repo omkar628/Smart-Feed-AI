@@ -270,15 +270,17 @@ function sendToAIBackend(
         (result) => {
 
 
-            const interests = result.userInterests;
+            const interests = Array.isArray(result.userInterests)
+                ? result.userInterests
+                : result.userInterests
+                    ? Object.keys(result.userInterests)
+                    : [];
 
 
 
             if (
 
-                !interests ||
-
-                Object.keys(interests).length === 0
+                interests.length === 0
 
             ) {
 

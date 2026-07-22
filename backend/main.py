@@ -2,7 +2,7 @@ import os
 from functools import lru_cache
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import List, Optional
 from ml import AIRanker
 import uvicorn
 
@@ -28,9 +28,14 @@ class Video(BaseModel):
     channel: str
 
 class RankRequest(BaseModel):
-    # Expects format like: {"JEE Advanced": 50, "Programming": 30, "Entertainment": 20}
-    interests: Dict[str, int] 
+    # Preferred format: {"interests": ["Programming", "AI", "Startups"]}
+    # Also accepts {"selected_topics": [...]}.
+    interests: Optional[List[str]] = None
+    selected_topics: Optional[List[str]] = None
     videos: List[Video]
+
+    def topic_names(self) -> List[str]:
+        return self.selected_topics or self.interests or []
 
 # --- API Endpoints ---
 @app.get("/")
@@ -84,7 +89,7 @@ async def rank_feed(request: RankRequest):
     # The current backend contract already supports incremental ranking.
 
     # Process through the AI pipeline
-    ranked_results = ranker.rank_videos(videos_dict, request.interests)
+    ranked_results = ranker.rank_videos(videos_dict, request.topic_names())
     
     return {"ranked_videos": ranked_results}
 
